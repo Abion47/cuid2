@@ -35,7 +35,7 @@ Iterable<int> createHistogram(Iterable<BigInt> data, {int bucketCount = 20}) {
   return bins.map((e) => e['count'] as int);
 }
 
-Future<Map<String, dynamic>> createIdPool({max = 100000}) async {
+Map<String, String> createIdPool({int max = 100000}) {
   final set = <String>{};
 
   for (var i = 0; i < max; i++) {
@@ -51,5 +51,11 @@ Future<Map<String, dynamic>> createIdPool({max = 100000}) async {
   final ids = [...set];
   final numbers = ids.map((x) => idToBigInt(x.substring(1)));
   final histogram = createHistogram(numbers);
-  return {'ids': ids, 'numbers': numbers, 'histogram': histogram};
+
+  // Collapse lists to strings to make them isolate-compatible
+  return {
+    'ids': ids.join(':'),
+    'numbers': numbers.join(':'),
+    'histogram': histogram.join(':')
+  };
 }

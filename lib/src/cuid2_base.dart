@@ -1,106 +1,74 @@
-import 'dart:convert';
-import 'dart:math';
-import 'dart:typed_data';
-import './fp_native.dart' if (dart.library.html) './fp_web.dart';
-
-import 'package:pointycastle/digests/sha3.dart';
+import 'package:cuid2/src/utility.dart';
 
 class Cuid {
   static final _cache = <String, Cuid>{};
+  static final _alphabet =
+      List.generate(26, (i) => String.fromCharCode(i + 97), growable: false);
 
-  int idLength = 24;
-  final int _entropyLength = 32;
-  int Function()? counter;
-  Random _random = Random();
-  String Function()? fingerprint;
+  static const int defaultLength = 24;
+  static const int maxLength = 32;
 
   // ~22k hosts before 50% chance of initial counter collision
   // with a remaining counter range of 9.0e+15 in JavaScript.
-  final int initialCountMax = 476782367;
+  static const int _initialCountMax = 476782367;
 
-  final List<String> _alphabet =
-      List.generate(26, (i) => String.fromCharCode(i + 97));
+  final int idLength;
+  late final double Function() random;
+  late final int Function() counter;
+  late final String fingerprint;
 
-  Cuid._create(
-      [this.idLength = 24,
-      bool secure = false,
-      int Function()? counter,
-      String Function()? fingerprint]) {
-    if (secure) {
-      try {
-        _random = Random.secure();
-      } on UnsupportedError {
-        print("Random.secure() is not supported, but 'secure' flag was true");
-      }
-    }
-
-    this.fingerprint = fingerprint ?? createFingerprint;
-    this.counter = counter ??
-        _createCounter((_random.nextDouble() * initialCountMax).floor());
+  Cuid._create({
+    this.idLength = defaultLength,
+    double Function()? random,
+    int Function()? counter,
+    String? fingerprint,
+    bool throwIfInsecure = false,
+  }) : random = random ?? createRandom(throwIfInsecure: throwIfInsecure) {
+    this.fingerprint = fingerprint ?? createFingerprint(random: this.random);
+    this.counter =
+        counter ?? createCounter((this.random() * _initialCountMax).floor());
   }
 
-  factory Cuid(
-      [int idLength = 24,
-      bool secure = false,
-      int Function()? counter,
-      String Function()? fingerprint]) {
+  factory Cuid({
+    int idLength = defaultLength,
+    double Function()? random,
+    int Function()? counter,
+    String? fingerprint,
+    bool throwIfInsecure = false,
+  }) {
+    if (idLength < 2 || idLength > maxLength) {
+      throw ArgumentError(
+          'Length must be between 2 and $maxLength. Received: $idLength');
+    }
+
     return _cache.putIfAbsent(
-        '$secure$idLength${counter.hashCode}${fingerprint.hashCode}',
-        () => Cuid._create(idLength, secure, counter, fingerprint));
+      '${random.hashCode}$idLength${counter.hashCode}$fingerprint',
+      () => Cuid._create(
+        idLength: idLength,
+        random: random,
+        counter: counter,
+        fingerprint: fingerprint,
+        throwIfInsecure: throwIfInsecure,
+      ),
+    );
   }
 
-  String _createEntropy({int length = 4}) {
-    String entropy = "";
-
-    while (entropy.length < length) {
-      entropy =
-          "$entropy${(_random.nextDouble() * 36).floor().toRadixString(36)}";
-    }
-
-    return entropy;
+  static String _randomLetter(double Function() random) {
+    return _alphabet[(random() * _alphabet.length).floor()];
   }
-
-  /// Adapted from https://github.com/juanelas/bigint-conversion
-  /// MIT License Copyright (c) 2018 Juan Hernández Serrano
-  BigInt bufToBigInt(Uint8List buf) {
-    final bits = 8;
-
-    BigInt value = BigInt.zero;
-    for (final i in buf) {
-      final bi = BigInt.from(i);
-      value = (value << bits) + bi;
-    }
-    return value;
-  }
-
-  String _hash([String input = ""]) {
-    final d = SHA3Digest(512);
-    final sha3 = d.process(utf8.encode(input) as Uint8List);
-
-    // Drop the first character because it will bias the histogram
-    // to the left.
-    return bufToBigInt(sha3).toRadixString(36).substring(1);
-  }
-
-  String _randomLetter() {
-    return _alphabet[(_random.nextDouble() * _alphabet.length).floor()];
-  }
-
-  int Function() _createCounter(int count) => () => count++;
 
   /// Generates a new id based on the instance configuration
   String gen() {
-    final firstLetter = _randomLetter();
+    final firstLetter = _randomLetter(random);
     final time = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
-    String count = counter!().toRadixString(36);
+    String count = counter().toRadixString(36);
 
     // The salt should be long enough to be globally unique across the full
     // length of the hash. For simplicity, we use the same length as the
     // intended id output.
-    final salt = _createEntropy(length: idLength);
-    final hashInput =
-        "$time$salt$count${_hash(fingerprint!()).substring(0, _entropyLength)}";
+    final salt = createEntropy(random, length: idLength);
+    final hashInput = "$time$salt$count$fingerprint";
 
-    return "$firstLetter${_hash(hashInput).substring(1, idLength)}";
+    return "$firstLetter${hash(hashInput).substring(1, idLength)}";
   }
 }

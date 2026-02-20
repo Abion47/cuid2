@@ -24,15 +24,27 @@
 /// ```
 library cuid2;
 
+import 'dart:math';
+
 import 'src/cuid2_base.dart' show Cuid;
 
 /// Generates a new id (default length of 24).
-String cuid([int length = 24]) => Cuid(length).gen();
+///
+/// Attempts to use a cryptographic random generator by default. Falls back to `Random()` if the system
+/// can not provide a secure source of random numbers. Check [Random.secure()]
+String cuid([int length = Cuid.defaultLength]) => Cuid(idLength: length).gen();
 
 /// Generates a new id using cryptographic random generator (default length of 24).
 ///
-/// Falls back to `Random()` if the system can not provide a secure source of random numbers. Check [Random.secure()]
-String cuidSecure([int length = 24]) => Cuid(length, true).gen();
+/// Identical to [cuid] with the exception that an [UnsupportedError] is thrown if the system can not
+/// provide a secure source of random numbers.
+String cuidSecure([int length = Cuid.defaultLength]) {
+  try {
+    return Cuid(idLength: length, throwIfInsecure: true).gen();
+  } on UnsupportedError {
+    rethrow;
+  }
+}
 
 /// Creates a generator with the given options.
 ///
@@ -43,19 +55,37 @@ String cuidSecure([int length = 24]) => Cuid(length, true).gen();
 ///   myCounter(int start) => () => count+=5;
 ///   final config = cuidConfig(counter: myCounter(3));
 /// ```
-/// `fingerprint` _optional_ custom fingerprint function:
+/// `fingerprint` _optional_ custom fingerprint value:
 /// ```dart
-///   String myfingerprint() => "uniqueFingerprint123";
+///   String myfingerprint = "uniqueFingerprint123";
 ///   final config = cuidConfig(fingerprint: myfingerprint);
 /// ```
 ///
-/// `secure` _optional_ uses [Random.secure()] when set to true (if available), otherwise (default & fallback) it uses [Random()]
-Cuid cuidConfig(
-        {int length = 24,
-        int Function()? counter,
-        String Function()? fingerprint,
-        bool secure = false}) =>
-    Cuid(length, secure, counter, fingerprint);
+/// `random` _optional_ custom random number generator function. Defaults to using [Random.secure]
+/// whenever possible and falls back to [Random] if the system can not provide a cryptographic
+/// number generator.
+/// ```dart
+///   int value = 0;
+///   final myrandom = () => value++;
+///   final config = cuidConfig(random: myrandom);
+/// ```
+///
+/// `throwIfInsecure` _optional_ disallows falling back to [Random] if [Random.secure] is unavailable
+/// and will instead throw an [UnsupportedError] in that scenario (default is false).
+Cuid cuidConfig({
+  int length = Cuid.defaultLength,
+  int Function()? counter,
+  String? fingerprint,
+  double Function()? random,
+  bool throwIfInsecure = false,
+}) =>
+    Cuid(
+      idLength: length,
+      random: random,
+      counter: counter,
+      fingerprint: fingerprint,
+      throwIfInsecure: throwIfInsecure,
+    );
 
 /// Determines if the given string `id` is a valid CUID based on the specified length constraints.
 ///
@@ -74,9 +104,9 @@ Cuid cuidConfig(
 /// `id`: The input string to check for validity.
 /// `minLength`: The minimum length constraint for the input string (default: 2).
 /// `maxLength`: The maximum length constraint for the input string (default: 32).
-bool isCuid(String id, {int minLength = 2, int maxLength = 32}) {
+bool isCuid(String id, {int minLength = 2, int maxLength = Cuid.maxLength}) {
   final length = id.length;
-  final regex = RegExp(r'^[0-9a-z]+$');
+  final regex = RegExp(r'^[a-z][0-9a-z]+$');
 
   if (length >= minLength && length <= maxLength && regex.hasMatch(id)) {
     return true;
